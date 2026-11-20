@@ -7,6 +7,7 @@ from functools import lru_cache
 from typing import Any
 
 from config.prompts import (
+    CITATION_ERROR_MESSAGES,
     INVALID_QUESTION_MESSAGES,
     LLM_ERROR_MESSAGES,
     NOT_FOUND_MESSAGES,
@@ -27,7 +28,13 @@ from src.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-_SOURCE_MARKER = re.compile(r"\[S(\d+)\]")
+# Accepts both single markers ([S1]) and combined markers ([S1, S2, S5]).
+_SOURCE_MARKER = re.compile(r"\[(S\d+(?:\s*,\s*S\d+)*)\]")
+
+
+def _marker_source_ids(token: str) -> list[int]:
+    """Extract unique source numbers from a citation marker token."""
+    return list(dict.fromkeys(int(value) for value in re.findall(r"S(\d+)", token)))
 
 
 def _error_response(
@@ -230,6 +237,67 @@ class RAGChain:
 
         answer, sources, citation_status = self._validate_citations(answer, bundle)
 
+        # A model can occasionally ignore the citation instruction. Give it one
+        # explicit retry; never display an uncited answer or fabricated markers.
+        if citation_status in {"not_provided", "unverified"}:
+            logger.warning(
+                "Citation validation failed (%s); retrying once", citation_status
+            )
+            retry_prompt = (
+                user_prompt
+                + "\n\nCITATION RETRY: Your previous answer did not contain at least "
+                "one valid [S#] marker. Rewrite the same answer using only valid "
+                "source IDs from the context and cite every factual paragraph."
+            )
+            try:
+                retry_response = self.llm.generate(SYSTEM_PROMPT, retry_prompt)
+            except LLMError as exc:
+                logger.error(
+                    "LLM retry failure provider=%s code=%s detail=%s",
+                    self.provider_name,
+                    exc.code,
+                    exc.detail,
+                )
+                return _error_response(
+                    LLM_ERROR_MESSAGES[resolved_language],
+                    resolved_language,
+                    "llm_error",
+                    error_code=exc.code,
+                )
+            except Exception as exc:
+                logger.exception("Unexpected LLM retry failure: %s", exc)
+                return _error_response(
+                    LLM_ERROR_MESSAGES[resolved_language],
+                    resolved_language,
+                    "llm_error",
+                    error_code="unknown",
+                )
+
+            retry_answer = (retry_response.text or "").strip()
+            if _is_not_found_answer(retry_answer):
+                return {
+                    "answer": NOT_FOUND_MESSAGES[resolved_language],
+                    "language": resolved_language,
+                    "sources": [],
+                    "retrieval_status": "insufficient_context",
+                    "citation_status": "not_applicable",
+                    "provider": self.provider_name,
+                    "model": self.model_name,
+                    "retrieved_chunks": len(chunks),
+                }
+            if retry_answer:
+                answer, sources, citation_status = self._validate_citations(
+                    retry_answer, bundle
+                )
+
+        if citation_status in {"not_provided", "unverified"}:
+            return _error_response(
+                CITATION_ERROR_MESSAGES[resolved_language],
+                resolved_language,
+                "citation_error",
+                error_code="citation_missing",
+            )
+
         return {
             "answer": answer,
             "language": resolved_language,
@@ -249,7 +317,9 @@ class RAGChain:
             for source in bundle.sources
             if str(source.get("source_id", "")).startswith("S")
         }
-        cited_ids = {int(match) for match in _SOURCE_MARKER.findall(answer)}
+        cited_ids: set[int] = set()
+        for match in _SOURCE_MARKER.finditer(answer):
+            cited_ids.update(_marker_source_ids(match.group(1)))
 
         if not cited_ids:
             return answer, _dedupe_sources(bundle.sources), "not_provided"
@@ -259,10 +329,18 @@ class RAGChain:
             logger.warning("LLM referenced invalid source IDs: %s", sorted(invalid_ids))
 
             def replace_invalid(match: re.Match[str]) -> str:
-                return match.group(0) if int(match.group(1)) in valid_ids else ""
+                kept = [
+                    source_id
+                    for source_id in _marker_source_ids(match.group(1))
+                    if source_id in valid_ids
+                ]
+                if not kept:
+                    return ""
+                return "[" + ", ".join(f"S{source_id}" for source_id in kept) + "]"
 
             answer = _SOURCE_MARKER.sub(replace_invalid, answer)
             answer = re.sub(r"[ \t]{2,}", " ", answer).strip()
+            cited_ids &= valid_ids
 
         selected = [
             source

@@ -6,7 +6,7 @@ import pytest
 
 from config.prompts import NOT_FOUND_MESSAGES
 from config.settings import Settings
-from src.llm.base import LLMError
+from src.llm.base import LLMError, LLMResponse
 from src.rag.chain import RAGChain
 from tests.conftest import FakeLLM, FakeRetriever, make_chunks
 
@@ -17,6 +17,25 @@ def _chain(settings: Settings, retriever=None, llm=None) -> RAGChain:
         retriever or FakeRetriever(),
         llm or FakeLLM(),
     )
+
+
+class SequentialLLM:
+    """Fake LLM that returns a different answer on each call."""
+
+    name = "fake"
+    model = "fake-model"
+
+    def __init__(self, *answers: str) -> None:
+        self.answers = list(answers)
+        self.calls = 0
+        self.prompts: list[str] = []
+
+    def generate(self, system_prompt: str, user_prompt: str) -> LLMResponse:
+        self.calls += 1
+        self.prompts.append(user_prompt)
+        return LLMResponse(
+            text=self.answers.pop(0), provider=self.name, model=self.model
+        )
 
 
 def test_context_is_prepared_and_citations_validated(settings: Settings):
@@ -68,9 +87,54 @@ def test_invalid_source_ids_are_not_shown_as_citations(settings: Settings):
     result = _chain(settings, llm=FakeLLM("Invented claim [S9].")).ask_question(
         "What is PM-KISAN?", language="en"
     )
+    assert result["retrieval_status"] == "citation_error"
+    assert result["error_code"] == "citation_missing"
     assert "[S9]" not in result["answer"]
-    assert result["citation_status"] == "unverified"
-    assert all(source["source_id"] in {"S1", "S2"} for source in result["sources"])
+
+
+def test_combined_source_markers_are_valid(settings: Settings):
+    result = _chain(settings, llm=FakeLLM("Answer [S1, S2].")).ask_question(
+        "What is PM-KISAN?", language="en"
+    )
+    assert result["retrieval_status"] == "success"
+    assert result["citation_status"] == "verified"
+    assert len(result["sources"]) == 2
+
+
+def test_invalid_id_inside_combined_marker_is_removed(settings: Settings):
+    result = _chain(settings, llm=FakeLLM("Answer [S1, S9].")).ask_question(
+        "What is PM-KISAN?", language="en"
+    )
+    assert "[S9]" not in result["answer"]
+    assert "[S1]" in result["answer"]
+    assert result["citation_status"] == "verified"
+    assert len(result["sources"]) == 1
+
+
+def test_missing_citations_are_retried_once(settings: Settings):
+    llm = SequentialLLM(
+        "Eligible farmers receive Rs 6000 per year.",
+        "Eligible farmers receive Rs 6000 per year [S1].",
+    )
+    result = _chain(settings, llm=llm).ask_question(
+        "What is PM-KISAN?", language="en"
+    )
+    assert llm.calls == 2
+    assert "CITATION RETRY" in llm.prompts[1]
+    assert result["retrieval_status"] == "success"
+    assert result["citation_status"] == "verified"
+    assert len(result["sources"]) == 1
+
+
+def test_persistent_missing_citations_are_rejected(settings: Settings):
+    llm = SequentialLLM("Uncited answer one.", "Uncited answer two.")
+    result = _chain(settings, llm=llm).ask_question(
+        "What is PM-KISAN?", language="en"
+    )
+    assert llm.calls == 2
+    assert result["retrieval_status"] == "citation_error"
+    assert result["error_code"] == "citation_missing"
+    assert result["sources"] == []
 
 
 def test_insufficient_context_response(settings: Settings):

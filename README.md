@@ -10,6 +10,8 @@ This project was built as a transparent, inspectable RAG application. It does **
 
 ## Table of contents
 
+- [Quick start (after cloning)](#quick-start-after-cloning)
+
 1. [Project status](#1-project-status)
 2. [What the application does](#2-what-the-application-does)
 3. [What was built in this project](#3-what-was-built-in-this-project)
@@ -35,9 +37,136 @@ This project was built as a transparent, inspectable RAG application. It does **
 
 ---
 
+## Quick start (after cloning)
+
+Use this path when a teammate clones or pulls the repository onto a new machine.
+
+> The repository intentionally excludes the PDF corpus, `.env`, `.venv/`, `storage/`, and `.local/`. You must restore the documents and create your own local configuration before building the index.
+
+### 1. Clone and enter the project
+
+```bash
+git clone <your-private-repo-url>.git
+cd kisan-sahayak
+```
+
+### 2. Create the Python 3.11 environment
+
+Use Python **3.11**. If your system default is different, replace `python3.11` with the path to a 3.11 interpreter.
+
+```bash
+python3.11 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r requirements.txt
+```
+
+On Windows, use `.venv\Scripts\python.exe` instead of `.venv/bin/python`.
+
+### 3. Restore the PDF corpus
+
+The 26 source PDFs are about 71 MB and are distributed separately from Git.
+
+1. Get the team `data/raw` archive from the agreed shared drive or college storage.
+2. Extract it at the project root so the folders look like this:
+
+```text
+kisan-sahayak/
+└── data/
+    └── raw/
+        ├── central_schemes/
+        ├── crop_advisory/
+        ├── maharashtra_schemes/
+        ├── soil_and_fertilizer/
+        └── weather_advisory/
+```
+
+3. Do **not** rename or reorder the files. The inventory uses their original filenames and SHA-256 hashes. See `data/raw/README.md` for the full corpus-restoration notes.
+
+### 4. Install Tesseract for OCR
+
+Ingestion uses OCR for scanned/screenshot-heavy pages. On Ubuntu/Debian:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y tesseract-ocr tesseract-ocr-mar tesseract-ocr-hin tesseract-ocr-eng
+
+.venv/bin/python ingest.py --ocr-health
+```
+
+Leave `TESSERACT_CMD` blank in `.env` to use the system `tesseract` binary. If you install Tesseract somewhere custom, set `TESSERACT_CMD` to that absolute path.
+
+### 5. Create your local `.env`
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and add your own key. Leave `GEMINI_MODEL` empty for now:
+
+```env
+GEMINI_API_KEY=your-own-key-here
+GEMINI_MODEL=
+```
+
+Then list the models available to your key and copy one printed model ID into `GEMINI_MODEL`:
+
+```bash
+.venv/bin/python ingest.py --list-models
+```
+
+Do not guess a model name and do not commit `.env`. Every teammate should use their own key.
+
+### 6. Build the index and verify
+
+```bash
+.venv/bin/python ingest.py
+.venv/bin/python ingest.py --stats
+.venv/bin/python -m pytest -q
+```
+
+Expected results:
+
+```text
+ChromaDB collection count: 2240
+59 passed
+```
+
+The first ingestion downloads the embedding model and builds ChromaDB, so it takes a few minutes. Later runs are incremental and skip unchanged documents.
+
+### 7. Run the app
+
+```bash
+.venv/bin/streamlit run app.py
+```
+
+Open the URL printed by Streamlit, usually `http://localhost:8501`.
+
+Without a key, the app still starts and retrieval/tests work, but it shows a configuration message instead of generating answers.
+
+### Optional: use local Ollama instead of Gemini
+
+Set these in `.env`:
+
+```env
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.2:3b
+```
+
+Then start the local server in another terminal:
+
+```bash
+ollama serve
+ollama pull llama3.2:3b
+```
+
+Never commit `.env`, `data/raw/**/*.pdf`, `storage/`, `.venv/`, or `.local/`.
+
+---
+
 ## 1. Project status
 
-The project is **indexed and testable locally**. The retrieval pipeline works without any API key. Live answer generation is not yet verified in this workspace because no Gemini API key or model ID is configured.
+The project is **indexed, tested, and live-verified**. Retrieval works without any API key. With a configured Gemini key and model, all 24 answerable evaluation questions produced verified live answers and all six unsupported questions abstained.
 
 | Item | Current result |
 |---|---|
@@ -49,17 +178,17 @@ The project is **indexed and testable locally**. The retrieval pipeline works wi
 | OCR pages | **97** |
 | Ingestion failures | **0** |
 | ChromaDB collection | `farmer_knowledge` |
-| Automated tests | **50 passed** |
+| Automated tests | **59 passed** |
 | Dependency check | `pip check` reports no broken requirements |
-| Retrieval evaluation | **100% hit@5**, **MRR 1.000**, **recall 0.979** |
-| Recommended similarity threshold | **0.66** for the current index |
-| Streamlit smoke test | **Passed**: no-key configuration message and dummy-key startup |
+| Retrieval evaluation | **100% hit@5**, **MRR 1.000**, **recall 0.979**, mean top score **0.7822** |
+| Runtime similarity threshold | **0.66** (configured default and `.env.example` value) |
+| Streamlit smoke test | **Passed**: no-key configuration message and configured startup |
 | Incremental ingestion | **Passed**: 26 unchanged documents skipped; collection stayed at 2,240 |
-| Live Gemini verification | **Pending credentials** |
-| `.env` in this workspace | **Absent** |
-| `GEMINI_API_KEY` in this workspace | **Absent** |
+| Live Gemini verification | **Completed**: all 24 answerable questions produced verified live answers; 6/6 unsupported questions abstained |
+| `.env` in this workspace | **Present** (ignored by Git) |
+| `GEMINI_API_KEY` in this workspace | **Present** in `.env`; never printed or committed |
 
-> **Important distinction:** the 100% retrieval hit rate means the expected **document** was retrieved in the top 5 results. It does not mean that every generated answer has been checked by a human. Answer-level verification requires a configured LLM and is still listed as remaining work.
+> **Important distinction:** the 100% retrieval hit rate means the expected **document** was retrieved in the top 5 results. Live answer verification additionally checked generated Marathi, Hindi, and English answers, citations, abstention, and graceful API-failure behavior. It is not a formal human fact-check of every claim.
 
 ---
 
@@ -154,6 +283,7 @@ The following parts are project-specific code written for Kisan Sahayak:
 
 - **Multilingual retrieval improvements**
   - Marathi/Hindi scheme-name query expansion
+  - Section-level intent hints for procedures and scheme benefits
   - Title-aware embeddings
   - Per-document diversification
   - Fill-to-`top_k` behavior
@@ -176,7 +306,7 @@ The following parts are project-specific code written for Kisan Sahayak:
   - Configuration and health messages
 
 - **Tests and evaluation**
-  - 50 automated tests
+  - 59 automated tests
   - A 30-question evaluation dataset
   - Retrieval evaluation with hit rate, MRR, and recall
   - Live generation evaluation scaffolding
@@ -351,7 +481,7 @@ A threshold rejects weak matches.
 
 For the current index, the measured scores are:
 
-- Lowest supported answerable question: **0.7016**
+- Lowest supported answerable question: **0.7200**
 - Highest unsupported question: **0.6590**
 
 A threshold of **0.66** separates those cases in the current evaluation set. It is a calibrated starting point, not a universal constant. Revisit it after adding documents or changing the embedding model.
@@ -433,7 +563,7 @@ The app then checks that `S1` and `S2` are real source IDs that were actually re
                     │ Question processing                │
                     │ 1. Safety/redaction                │
                     │ 2. Scheme-name query expansion     │
-                    │ 3. Embedding                       │
+                    │ 3. Embedding + intent fusion       │
                     │ 4. Top-k search + threshold        │
                     │ 5. Per-document diversification    │
                     │ 6. Context + source IDs            │
@@ -559,7 +689,7 @@ kisan-sahayak/
 │   └── utils/                     # Logging, text, redaction, language
 ├── storage/                       # Generated ChromaDB + manifest
 ├── logs/                          # Generated logs
-└── tests/                         # 50 automated tests
+└── tests/                         # 59 automated tests
 ```
 
 ---
@@ -802,6 +932,8 @@ The project therefore appends English retrieval names for known aliases. Example
 
 The aliases are retrieval aids only. They do not add answer facts and are not shown to the LLM as evidence. The list lives in `src/retrieval/query_expansion.py`.
 
+For questions that ask for **methods, claim steps, or benefit amounts**, the retriever also sends a short English section-level hint as a second query. Examples include `cultural practices / mechanical practices / biocontrol practices` for cotton IPM, `claim intimation procedure documents` for PMFBY, and `interest subvention norms` for the Agriculture Infrastructure Fund. These hints name document sections or generic concepts; they do not contain amounts, deadlines, eligibility rules, or other answer facts.
+
 ### 10.2 Search and diversification
 
 The retriever defaults to `top_k=5`.
@@ -809,16 +941,22 @@ The retriever defaults to `top_k=5`.
 It fetches extra candidates, then:
 
 1. Applies the relevance threshold.
-2. Prefers at most `MAX_CHUNKS_PER_DOCUMENT=2` chunks from one document.
-3. Fills the remaining slots from the best available chunks if diversification makes the list shorter than `top_k`.
+2. If an intent hint applies, keeps the best three results from the primary query and the best three from the hint query, merges them by chunk ID, and ranks the union.
+3. Prefers at most `MAX_CHUNKS_PER_DOCUMENT=2` chunks from one document.
+4. Fills the remaining slots from the best available chunks if diversification makes the list shorter than `top_k`.
 
-This avoids a common RAG problem: one long document occupying the entire context window while other relevant documents are pushed out.
+This avoids two common RAG problems:
+
+- One long document occupying the entire context window while other relevant documents are pushed out.
+- A Marathi or Hindi question finding only the general definition of a topic, while the English document's actionable procedure section stays outside the top results.
+
+This is intentionally a small, transparent query-fusion step, not an agent or a LangChain pipeline.
 
 ### 10.3 Why the threshold is 0.66
 
 The retrieval evaluation measured:
 
-- Lowest supported top score: **0.7016**
+- Lowest supported top score: **0.7200**
 - Highest unsupported top score: **0.6590**
 
 Threshold comparison on the current index:
@@ -922,23 +1060,24 @@ The app can start without a Gemini key. It will show a configuration message ins
 ### 13.1 Requirements
 
 - Python 3.11
-- The project virtual environment at `.venv`
-- Linux for the bundled local Tesseract installation
-- Internet access for the first embedding model download
-- Internet access for hosted Gemini
+- A local virtual environment at `.venv`
+- Tesseract OCR with Marathi, Hindi, and English language data for ingestion
+- Internet access for the first embedding-model download
+- Internet access for hosted Gemini, or a running local Ollama server
 - No GPU required
 
-The system `python3` on this machine is newer than the project environment. Always use `.venv/bin/python`.
+On Linux/macOS use `.venv/bin/python` and `.venv/bin/streamlit`. On Windows use `.venv\Scripts\python.exe` and `.venv\Scripts\streamlit.exe`.
 
 ### 13.2 Setup
 
-```bash
-cd /home/govind-suryawanshi/Documents/rag_database/kisan-sahayak
+For a fresh clone, follow the full [Quick start (after cloning)](#quick-start-after-cloning) above. In short:
 
-# The environment is already created in this workspace.
-# On a fresh machine:
-#   ~/.local/bin/python3.11 -m venv .venv
-#   .venv/bin/pip install -r requirements.txt
+```bash
+cd kisan-sahayak
+
+python3.11 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r requirements.txt
 
 cp .env.example .env
 ```
@@ -1038,7 +1177,7 @@ This is useful for demonstrating the retrieval and engineering work before live 
 .venv/bin/python -m pytest -q
 ```
 
-The current suite has **50 tests** and covers:
+The current suite has **59 tests** and covers:
 
 - PDF extraction and page metadata
 - Blank and invalid PDFs
@@ -1050,7 +1189,7 @@ The current suite has **50 tests** and covers:
 - ChromaDB operations
 - Retrieval and thresholds
 - Per-document diversification and fill behavior
-- Marathi/Hindi query expansion and false-positive guards
+- Marathi/Hindi query expansion, intent hints, and false-positive guards
 - RAG citations, abstention, and failure handling
 - Chat-service errors
 - Incremental ingestion and stale-chunk replacement
@@ -1151,7 +1290,7 @@ Explain that the project does not train a model; it builds a custom document and
 #### Step 2 — Show the corpus status
 
 ```bash
-cd /home/govind-suryawanshi/Documents/rag_database/kisan-sahayak
+cd kisan-sahayak
 .venv/bin/python ingest.py --stats
 ```
 
@@ -1275,7 +1414,7 @@ For each answer, expand **Supporting sources** and point out:
 
 A concise explanation:
 
-> “I built the data ingestion and evaluation pipeline around pretrained tools. I curated the document corpus, wrote the page-aware extraction and OCR fallback flow, implemented sliding overlapping chunks with stable IDs and an incremental manifest, integrated a local multilingual embedding model with ChromaDB, added Marathi/Hindi scheme-name query expansion, designed per-document retrieval diversification, built the grounded RAG chain with citation validation and abstention, and created the Streamlit UI and 30-question evaluation set. I did not train the embedding model or the LLM.”
+> “I built the data ingestion and evaluation pipeline around pretrained tools. I curated the document corpus, wrote the page-aware extraction and OCR fallback flow, implemented sliding overlapping chunks with stable IDs and an incremental manifest, integrated a local multilingual embedding model with ChromaDB, added Marathi/Hindi scheme-name and section-intent query expansion, designed per-document retrieval diversification, built the grounded RAG chain with citation validation and abstention, and created the Streamlit UI and 30-question evaluation set. I did not train the embedding model or the LLM.”
 
 ### 15.4 What to show as evidence
 
@@ -1308,7 +1447,7 @@ Do not claim:
 - Inspect the document corpus and inventory
 - Rebuild the local vector index
 - Check OCR health
-- Run all 50 tests
+- Run all 59 tests
 - Run the retrieval evaluation
 - Inspect retrieved chunks, page numbers, and scores
 - Demonstrate the architecture and engineering decisions
@@ -1355,6 +1494,7 @@ Results on the current index with no threshold filter:
 | Hit@5 | **100% (24/24)** |
 | MRR@5 | **1.000** |
 | Expected-document recall@5 | **0.979** |
+| Mean expected-document score | **0.7822** |
 | Marathi hit rate | 100% |
 | Hindi hit rate | 100% |
 | English hit rate | 100% |
@@ -1365,13 +1505,20 @@ Before the retrieval fixes, the hit rate was approximately **58%**. The improvem
 - Title/scheme-aware embedding text
 - Exact 100-word overlap
 - Multilingual scheme-name expansion
+- Section-level intent hints for procedures and scheme benefits
 - Per-document diversification
+
+The final evidence audit also confirmed that the top-5 context now includes:
+
+- Cotton IPM cultural, mechanical, and biocontrol practices — `GRD-040`, page 36
+- PMFBY claim-intimation and loss-assessment steps — `GRD-005`, pages 54–61
+- Agriculture Infrastructure Fund 3% interest-subvention clause — `AIF-001`, pages 5–6
 
 ### 17.2 Threshold separation
 
 | Group | Top score range |
 |---|---:|
-| Answerable questions | 0.7016 – 0.8544 |
+| Answerable questions | 0.7200 – 0.8526 |
 | Unsupported questions | 0.3595 – 0.6590 |
 
 A threshold of **0.66** cleanly separates the current evaluation set.
@@ -1403,57 +1550,27 @@ Until that is done, report retrieval results and deliberately avoid claiming ver
   - 0 failures;
   - collection count remained 2,240.
 
-### Priority 1 — Live Gemini verification (requires credentials)
+### Completed — Live Gemini verification
 
-This is the main remaining blocker.
+- The API key was moved into the Git-ignored `.env`; `.env.example` is blank again. The key was never printed in logs or answers.
+- `ingest.py --list-models` loaded the available model list successfully.
+- `GEMINI_MODEL=gemini-3.8-flash` produced correct, well-cited answers. The full run then hit the free tier's **20 requests/day** limit, plus a few temporary `504`/`503` responses. Those failures were returned as localized, graceful `llm_error` messages, not crashes.
+- `GEMINI_MODEL=gemini-3.5-flash-lite` had available quota and was used to finish verification. Across both models, **all 24 answerable questions** produced at least one live `success` answer with verified citations (10 with `gemini-3.8-flash`, 14 with `gemini-3.5-flash-lite`). The workspace `.env` currently uses `gemini-3.5-flash-lite` so the demo works immediately; you may set any listed model explicitly.
+- **Abstention:** all six unsupported questions returned the configured not-found response in the full run, with zero LLM calls for those questions.
+- **Citations:** validation accepts both `[S1]` and combined markers such as `[S1, S2, S5]`. Invalid IDs are stripped; uncited answers get one explicit retry and are then safely rejected instead of being shown.
+- **Content checks:** live answers included the PMFBY 72-hour intimation and claim steps, cotton IPM cultural/mechanical/biocontrol practices, soil sampling at 15–20 cm with a V-shaped cut, AIF 3% interest subvention / ₹2 crore cap / 7-year period, Maha-DBT registration and OTP steps, and MahaAgri-AI 2025–2029 objectives.
+- **Sources:** source cards showed real document titles and page numbers. The only URL observed in an answer (`mahadbt.maharashtra.gov.in/Farmer`) appears verbatim in `GRD-027`, page 2; no links were fabricated.
+- **Historical caveats:** PM-KISAN answers stated that the available documents describe 2018–19 rules and told users to verify current rules.
+- **Stability:** Marathi, Hindi, and English script checks passed for all live answers that were generated.
 
-1. Add `GEMINI_API_KEY` to `.env`.
-2. Run `ingest.py --list-models`.
-3. Choose a model that appears in the list.
-4. Set `GEMINI_MODEL`.
-5. Run the live evaluation.
-6. Manually verify:
-   - Marathi answer
-   - Hindi answer
-   - English answer
-   - citations in the UI
-   - source cards and page numbers
-   - unsupported-question refusal
-   - quota/network error handling
-   - PM-KISAN historical caveat
-
-### Priority 2 — Representative answer and content review
-
-Once live generation works, check answers and retrieved chunks for:
-
-- PM-KISAN amount and eligibility
-- 2018–19 caveat
-- Marathi OCR quality
-- Cotton IPM methods
-- Maha-DBT registration/OTP
-- MahaAgri-AI policy noise
-- page and page-range accuracy
-
-The retrieval side for several of these subjects was already inspected manually, but the generated answers still need review.
-
-### Priority 3 — Optional improvements
+### Remaining optional improvements
 
 - Add verified official URLs to the inventory
 - Add Hindi source documents
 - Add current scheme guidelines
 - Add more evaluation questions
-- Add answer-level human review
-- Initialize Git and commit the project
-- Add screenshots to the guide
-- Add a small demo video or slide deck
-
-### Optional improvements
-
-- Add verified official URLs to the inventory
-- Add Hindi source documents
-- Add current scheme guidelines
-- Add more evaluation questions
-- Add answer-level human review
+- Add a longer paid-tier live run with a single model
+- Add answer-level expert review
 - Initialize Git and commit the project
 - Add screenshots to the guide
 - Add a small demo video or slide deck
@@ -1471,7 +1588,7 @@ The retrieval side for several of these subjects was already inspected manually,
 7. **Maha-DBT manual is screenshot-heavy.** OCR may miss screenshot-only details.
 8. **Public demo beneficiary data appears in screenshots.** Context is redacted best-effort, but the original PDF is unchanged.
 9. **The embedding model has a 128-token limit.** Sliding windows mitigate this but do not make the model see entire documents at once.
-10. **Retrieval hit rate is not answer accuracy.** Live answer evaluation remains pending.
+10. **Retrieval hit rate is not answer accuracy.** Live answer generation was verified across all 24 answerable questions, but that is not the same as an expert fact-check of every generated claim.
 
 ---
 
@@ -1526,7 +1643,7 @@ The model downloads on first use. Later runs use the local cache.
 
 ### `RELEVANCE_THRESHOLD` causes refusals
 
-Use the measured value **0.66** for the current index, or leave it blank while inspecting raw scores. Lower it if supported questions are being rejected. Recalibrate after changing the model or corpus.
+The application defaults to the measured value **0.66** for the current index. Set it to a blank value only while inspecting raw scores. Lower it if supported questions are being rejected. Recalibrate after changing the model or corpus.
 
 ### Streamlit port is busy
 
@@ -1547,7 +1664,8 @@ Then confirm `LLM_PROVIDER=ollama` and that the selected model is installed.
 ## 22. Commands at a glance
 
 ```bash
-cd /home/govind-suryawanshi/Documents/rag_database/kisan-sahayak
+# After cloning and restoring data/raw (see Quick start above)
+cd kisan-sahayak
 
 # Environment and health
 .venv/bin/python --version
@@ -1577,4 +1695,4 @@ cd /home/govind-suryawanshi/Documents/rag_database/kisan-sahayak
 
 ---
 
-**Bottom line:** Kisan Sahayak is a working local RAG system with a real document index, a tested ingestion and retrieval pipeline, multilingual query handling, source citations, abstention behavior, and a Streamlit demonstration. The retrieval and engineering layers are in good shape. Live Gemini answer generation is the remaining verification step because credentials are not configured in this workspace.
+**Bottom line:** Kisan Sahayak is a working local RAG system with a real document index, a tested ingestion and retrieval pipeline, multilingual query handling, source citations, abstention behavior, and a Streamlit demonstration. Retrieval and live Gemini answer generation have both been verified end to end. New teammates should start with the [Quick start (after cloning)](#quick-start-after-cloning) section above.

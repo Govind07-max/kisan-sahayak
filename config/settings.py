@@ -78,7 +78,7 @@ class Settings(BaseSettings):
     # Retrieval / RAG
     # ------------------------------------------------------------------
     top_k: int = Field(default=5, ge=1, le=20)
-    relevance_threshold: float | None = Field(default=None, ge=-1.0, le=1.0)
+    relevance_threshold: float | None = Field(default=0.66, ge=-1.0, le=1.0)
     max_chunks_per_document: int = Field(default=2, ge=1, le=20)
     query_expansion_enabled: bool = True
     max_context_chars: int = Field(default=14000, ge=1000, le=60000)

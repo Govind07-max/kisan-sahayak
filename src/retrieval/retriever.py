@@ -7,7 +7,7 @@ from typing import Any
 
 from config.settings import Settings
 from src.embeddings.embedder import EmbeddingError, EmbeddingService
-from src.retrieval.query_expansion import expand_query
+from src.retrieval.query_expansion import build_retrieval_queries
 from src.utils.logging import get_logger
 from src.vectorstore.chroma_store import ChromaStore, VectorStoreError
 
@@ -57,10 +57,10 @@ class Retriever:
         used_threshold = (
             self.settings.relevance_threshold if threshold is None else threshold
         )
-        search_question = (
-            expand_query(question.strip())
+        search_queries = (
+            build_retrieval_queries(question.strip())
             if self.settings.query_expansion_enabled
-            else question.strip()
+            else [question.strip()]
         )
         per_document_cap = max(0, self.settings.max_chunks_per_document)
         # Fetch extra candidates so per-document diversification does not
@@ -69,39 +69,74 @@ class Retriever:
             max(k * (per_document_cap + 2), k + 8) if per_document_cap else k,
             100,
         )
+
+        candidate_lists: list[list[RetrievedChunk]] = []
         try:
-            query_embedding = self.embedder.encode_query(search_question)
-            result = self.store.query(
-                query_embedding=query_embedding,
-                n_results=fetch_k,
-                category=category,
-            )
+            for search_query in search_queries:
+                query_embedding = self.embedder.encode_query(search_query)
+                result = self.store.query(
+                    query_embedding=query_embedding,
+                    n_results=fetch_k,
+                    category=category,
+                )
+                ids = (result.get("ids") or [[]])[0]
+                documents = (result.get("documents") or [[]])[0]
+                metadatas = (result.get("metadatas") or [[]])[0]
+                distances = (result.get("distances") or [[]])[0]
+
+                query_candidates: list[RetrievedChunk] = []
+                for index, chunk_id in enumerate(ids):
+                    text = documents[index] if index < len(documents) else ""
+                    metadata = metadatas[index] if index < len(metadatas) else {}
+                    distance = (
+                        float(distances[index]) if index < len(distances) else 1.0
+                    )
+                    score = 1.0 - distance  # Chroma cosine distance
+                    if used_threshold is not None and score < used_threshold:
+                        continue
+                    query_candidates.append(
+                        RetrievedChunk(
+                            chunk_id=str(chunk_id),
+                            text=text or "",
+                            metadata=metadata or {},
+                            distance=distance,
+                            score=score,
+                        )
+                    )
+                candidate_lists.append(query_candidates)
         except (EmbeddingError, VectorStoreError) as exc:
             raise RetrievalError(str(exc)) from exc
         except Exception as exc:
             raise RetrievalError(f"Unexpected retrieval failure: {exc}") from exc
 
-        ids = (result.get("ids") or [[]])[0]
-        documents = (result.get("documents") or [[]])[0]
-        metadatas = (result.get("metadatas") or [[]])[0]
-        distances = (result.get("distances") or [[]])[0]
+        if not candidate_lists or all(not items for items in candidate_lists):
+            candidates: list[RetrievedChunk] = []
+        elif len(candidate_lists) == 1:
+            candidates = candidate_lists[0]
+        else:
+            # A single conflicting query can drown the section-level intent in
+            # generic definitions.  Keep the best few results from each query,
+            # merge by chunk ID, and rank the merged candidates by similarity.
+            per_query_limit = max(1, min(k, 3))
+            fused: dict[str, RetrievedChunk] = {}
+            for query_candidates in candidate_lists:
+                for candidate in query_candidates[:per_query_limit]:
+                    existing = fused.get(candidate.chunk_id)
+                    if existing is None or candidate.score > existing.score:
+                        fused[candidate.chunk_id] = candidate
 
-        candidates: list[RetrievedChunk] = []
-        for index, chunk_id in enumerate(ids):
-            text = documents[index] if index < len(documents) else ""
-            metadata = metadatas[index] if index < len(metadatas) else {}
-            distance = float(distances[index]) if index < len(distances) else 1.0
-            score = 1.0 - distance  # Chroma cosine distance
-            if used_threshold is not None and score < used_threshold:
-                continue
-            candidates.append(
-                RetrievedChunk(
-                    chunk_id=str(chunk_id),
-                    text=text or "",
-                    metadata=metadata or {},
-                    distance=distance,
-                    score=score,
-                )
+            if len(fused) < k:
+                for query_candidates in candidate_lists:
+                    for candidate in query_candidates:
+                        if candidate.chunk_id not in fused:
+                            fused[candidate.chunk_id] = candidate
+                        if len(fused) >= k:
+                            break
+                    if len(fused) >= k:
+                        break
+
+            candidates = sorted(
+                fused.values(), key=lambda candidate: candidate.score, reverse=True
             )
 
         chunks: list[RetrievedChunk] = []
@@ -133,11 +168,12 @@ class Retriever:
                     break
 
         logger.info(
-            "Retrieved %d chunk(s) for query (top_k=%d, fetched=%d, threshold=%s, "
-            "per_document_cap=%d)",
+            "Retrieved %d chunk(s) for query (top_k=%d, fetched=%d, queries=%d, "
+            "threshold=%s, per_document_cap=%d)",
             len(chunks),
             k,
             fetch_k,
+            len(search_queries),
             used_threshold,
             per_document_cap,
         )

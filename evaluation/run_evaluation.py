@@ -30,7 +30,7 @@ from src.utils.logging import configure_logging  # noqa: E402
 from src.vectorstore.chroma_store import ChromaStore  # noqa: E402
 
 DEFAULT_QUESTIONS = PROJECT_ROOT / "evaluation" / "questions.jsonl"
-_CITATION_RE = re.compile(r"\[S(\d+)\]")
+_CITATION_RE = re.compile(r"\[(?:S\d+\s*,\s*)*S\d+\]")
 _DEVANAGARI_RE = re.compile(r"[\u0900-\u097F]")
 
 
@@ -281,6 +281,7 @@ def live_evaluation(
     ]
     summary = {
         "mode": "live",
+        "threshold": threshold,
         "questions": len(records),
         "answerable_questions": len(answerable),
         "unsupported_questions": len(unsupported),
@@ -362,6 +363,13 @@ def main(argv: list[str] | None = None) -> int:
     configure_logging(settings.log_level, settings.log_file)
     settings.ensure_directories()
 
+    # Retrieval mode defaults to -1.0 so raw scores are visible.  Live mode
+    # must use the configured relevance threshold unless the caller explicitly
+    # supplies another one, otherwise unsupported questions would reach the LLM.
+    threshold = args.threshold
+    if args.live and threshold == -1.0:
+        threshold = settings.relevance_threshold
+
     if args.live:
         try:
             settings.validate_llm_settings()
@@ -389,7 +397,7 @@ def main(argv: list[str] | None = None) -> int:
             settings,
             retriever,
             args.top_k,
-            args.threshold,
+            threshold,
             args.limit,
         )
     else:

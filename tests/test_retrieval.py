@@ -196,6 +196,51 @@ def test_per_document_diversification(settings: Settings):
     assert len(filled) == 5
 
 
+def test_intent_query_results_are_fused_into_top_k(settings: Settings):
+    store = ChromaStore(settings)
+    chunks = []
+    for document_id, vector in (("DOC-PRIMARY", [1.0, 0.0, 0.0]), ("DOC-INTENT", [0.0, 1.0, 0.0])):
+        for index in range(3):
+            chunks.append(
+                {
+                    "id": f"{document_id}-{index}",
+                    "text": f"{document_id} cotton pest content {index}",
+                    "embedding": vector,
+                    "metadata": {
+                        "document_id": document_id,
+                        "document_title": document_id,
+                        "source_filename": f"{document_id}.pdf",
+                        "page_number": index + 1,
+                        "page_end": index + 1,
+                        "category": "crop_advisory",
+                        "language": "en",
+                        "source_url": "",
+                        "source_path": "",
+                        "scheme_or_crop": "Cotton",
+                        "publication_date": "",
+                        "validity_status": "",
+                        "chunk_index": index,
+                    },
+                }
+            )
+    _add(store, chunks)
+
+    class IntentEmbedder:
+        def encode_query(self, text):
+            # The primary question is Marathi; the intent hint is English.
+            return [1.0, 0.0, 0.0] if "कपास" in text else [0.0, 1.0, 0.0]
+
+        def encode_documents(self, texts):
+            return []
+
+    retriever = Retriever(settings, store, IntentEmbedder())
+    results = retriever.retrieve(
+        "कपास में एकीकृत कीट प्रबंधन के लिए कौन सी विधियाँ बताई गई हैं?",
+        top_k=3,
+    )
+    assert any(chunk.metadata["document_id"] == "DOC-INTENT" for chunk in results)
+
+
 def test_category_filter(settings: Settings):
     store = ChromaStore(settings)
     _add(

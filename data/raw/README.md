@@ -1,5 +1,7 @@
 # Source PDFs
 
+For the complete first-run path, see `README.md` → **Quick start (after cloning)**.
+
 The 26 source PDFs are intentionally **not committed to Git**. Their combined size is about 71 MB, and binary PDFs make repository clones and history unnecessarily heavy.
 
 ## What is tracked
@@ -46,7 +48,7 @@ kisan-sahayak/
 4. Confirm the corpus and index:
 
 ```bash
-cd /home/govind-suryawanshi/Documents/rag_database/kisan-sahayak
+cd kisan-sahayak
 .venv/bin/python ingest.py --stats
 .venv/bin/python ingest.py
 ```

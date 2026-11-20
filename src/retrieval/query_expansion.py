@@ -2,9 +2,10 @@
 
 The corpus is mostly English, while farmers ask questions in Marathi and Hindi.
 The multilingual embedding model handles cross-lingual meaning, but explicit
-scheme names are still easy to miss when they are written in a different script
-or as a local abbreviation.  These aliases add only scheme/topic names to the
-retrieval query; they never add answer facts, amounts, or dates.
+scheme names and section-level intents are still easy to miss when they are
+written in a different script or as a local abbreviation.  These expansions add
+only scheme/topic names and generic procedure headings to the retrieval query;
+they never add answer facts, amounts, eligibility rules, or dates.
 """
 
 from __future__ import annotations
@@ -88,6 +89,59 @@ _ALIAS_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
     ),
 )
 
+# (scheme/topic triggers, intent triggers, English retrieval hint)
+# These hints name document sections or generic concepts (for example,
+# "cultural practices" or "claim intimation").  They deliberately contain no
+# answer facts such as amounts, deadlines, or eligibility thresholds.
+_INTENT_RULES: tuple[
+    tuple[tuple[str, ...], tuple[str, ...], str], ...
+] = (
+    (
+        ("कापूस", "कपास", "cotton"),
+        ("कीड", "कीट", "pest", "ipm", "एकात्मिक", "integrated"),
+        "cotton integrated pest management cultural practices mechanical "
+        "practices biocontrol practices recommended methods",
+    ),
+    (
+        (
+            "पीक विमा",
+            "पंतप्रधान पीक विमा",
+            "फसल बीमा",
+            "प्रधानमंत्री फसल बीमा",
+            "pmfby",
+            "fasal bima",
+            "crop insurance",
+        ),
+        ("दावा", "claim", "नुकसान", "loss", "मुआवजा", "मुआवज़ा"),
+        "PMFBY crop insurance claim intimation procedure documents loss "
+        "assessment farmer",
+    ),
+    (
+        (
+            "कृषि अवसंरचना",
+            "कृषी अवसंरचना",
+            "agriculture infrastructure",
+            "aif",
+        ),
+        ("ब्याज", "interest", "सब्सिडी", "subvention"),
+        "Agriculture Infrastructure Fund AIF interest subvention norms "
+        "maximum loan period",
+    ),
+    (
+        (
+            "महाॲग्री",
+            "महा एआय",
+            "महाएआय",
+            "mahaagri",
+            "maha-agri",
+            "maha agri",
+        ),
+        ("उद्दिष्ट", "उद्दिष्टे", "objective", "ध्येय", "vision", "कालावधी", "period"),
+        "MahaAgri AI Policy 2025-2029 vision objectives mission implementation "
+        "period",
+    ),
+)
+
 
 def _has_latin_trigger(question: str, trigger: str) -> bool:
     """Avoid matching short Latin abbreviations inside unrelated words."""
@@ -113,3 +167,30 @@ def expand_query(question: str) -> str:
         + "\nRelevant scheme/topic names for retrieval: "
         + "; ".join(extras)
     )
+
+
+def build_retrieval_queries(question: str) -> list[str]:
+    """Return the primary query plus any matching intent-level hints.
+
+    The first item is always the normal scheme-expanded question.  Additional
+    English hints are used as separate retrieval queries, so a Marathi or Hindi
+    question can still reach an English procedure section without diluting the
+    original query.  The retriever fuses the best results from each query.
+    """
+    if not question or not question.strip():
+        return []
+    primary = expand_query(question)
+    queries = [primary]
+    lowered = question.casefold()
+    for scheme_triggers, intent_triggers, hint in _INTENT_RULES:
+        if not any(
+            _has_latin_trigger(lowered, trigger) for trigger in scheme_triggers
+        ):
+            continue
+        if not any(
+            _has_latin_trigger(lowered, trigger) for trigger in intent_triggers
+        ):
+            continue
+        if hint.casefold() not in primary.casefold() and hint not in queries:
+            queries.append(hint)
+    return queries
