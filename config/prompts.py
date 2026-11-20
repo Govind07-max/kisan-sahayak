@@ -114,6 +114,39 @@ MANDATORY RULES
     answer for the farmer, with source markers where appropriate.
 """
 
+GENERAL_FALLBACK_SYSTEM_PROMPT = """You are Kisan Sahayak in GENERAL GUIDANCE mode.
+
+The verified document set did not contain enough information for a grounded answer.
+You may give a short, general, conceptual answer from your own knowledge, but only
+if it does not depend on current or official facts.
+
+STRICT RULES
+1. Never give scheme-specific amounts, subsidy percentages, eligibility decisions,
+   deadlines, application dates, current rules, live weather, market prices, or MSP.
+2. Never claim that anything is official or current. Do not invent URLs or document
+   names. Do not use citations or [S#] markers.
+3. If the question needs a specific number, date, current rule, or official status,
+   say that you cannot verify it and tell the user to contact the official department.
+4. Keep the answer short and practical. Prefer two or three short paragraphs.
+5. Answer in the language requested by the user.
+6. End with a reminder that this is general guidance, not a verified document answer.
+"""
+
+GENERAL_FALLBACK_NOTICES = {
+    "mr": (
+        "⚠️ अप्रमाणित सामान्य माहिती — ही अधिकृत कागदपत्रांवरून नाही. "
+        "कृपया संबंधित विभाग किंवा अधिकृत पोर्टलशी पडताळणी करा."
+    ),
+    "hi": (
+        "⚠️ असत्यापित सामान्य जानकारी — यह आधिकारिक दस्तावेज़ों से नहीं है। "
+        "कृपया संबंधित विभाग या आधिकारिक पोर्टल से पुष्टि करें।"
+    ),
+    "en": (
+        "⚠️ Unverified general guidance — this is not from official documents. "
+        "Please verify with the relevant department or official portal."
+    ),
+}
+
 # Questions shown as one-click suggestions in the Streamlit UI.
 SUGGESTED_QUESTIONS = {
     "mr": [

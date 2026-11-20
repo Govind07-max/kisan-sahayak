@@ -7,6 +7,7 @@ import streamlit as st
 from config.prompts import (
     APP_NAME,
     APP_SUBTITLE,
+    GENERAL_FALLBACK_NOTICES,
     SUGGESTED_QUESTIONS,
     UI_LANGUAGES,
 )
@@ -64,6 +65,8 @@ def add_message(
     sources: list[dict] | None = None,
     status: str | None = None,
     citation_status: str | None = None,
+    is_general_fallback: bool = False,
+    fallback_notice: str | None = None,
 ) -> None:
     st.session_state.messages.append(
         {
@@ -72,6 +75,8 @@ def add_message(
             "sources": sources or [],
             "status": status,
             "citation_status": citation_status,
+            "is_general_fallback": is_general_fallback,
+            "fallback_notice": fallback_notice,
         }
     )
 
@@ -101,6 +106,8 @@ def handle_question(question: str) -> None:
         sources=result.get("sources", []),
         status=result.get("retrieval_status"),
         citation_status=result.get("citation_status"),
+        is_general_fallback=bool(result.get("is_general_fallback")),
+        fallback_notice=result.get("fallback_notice"),
     )
     st.session_state.pending_question = None
     st.rerun()
@@ -135,13 +142,18 @@ def render_messages() -> None:
             st.markdown(message["content"])
             if message["role"] == "assistant":
                 status = message.get("status")
-                if status == "insufficient_context":
+                if message.get("is_general_fallback"):
+                    notice = message.get("fallback_notice") or GENERAL_FALLBACK_NOTICES.get(
+                        st.session_state.language, GENERAL_FALLBACK_NOTICES["en"]
+                    )
+                    st.warning(notice)
+                elif status == "insufficient_context":
                     st.caption("The documents did not contain enough verified detail for a confident answer.")
                 elif status in {"no_documents", "no_relevant_documents"}:
                     st.caption("No sufficiently relevant document was found for this question.")
                 elif status == "llm_error":
                     st.caption("The answer service failed; no answer was generated from the documents.")
-                citation_status = message.get("citation_status")
+                citation_status = None if message.get("is_general_fallback") else message.get("citation_status")
                 if citation_status == "unverified":
                     st.caption(
                         "The model's inline citation markers could not be matched; "
@@ -161,8 +173,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.caption(
-    "Answers are generated only from the available government and agricultural documents. "
-    "Always verify scheme details, deadlines, and benefits with the official department."
+    "Document-based answers are preferred. If unverified general guidance is enabled, "
+    "it is clearly labeled. Always verify scheme details, deadlines, and benefits "
+    "with the official department."
 )
 
 with st.sidebar:
@@ -185,6 +198,10 @@ with st.sidebar:
         st.caption(f"Collection: `{status['collection']}`")
         st.caption(f"LLM: `{status['provider']}` / `{status['model']}`")
         st.caption(f"Embedding: `{status['embedding_model']}`")
+        st.caption(
+            "General fallback: "
+            + ("enabled" if status.get("enable_general_llm_fallback") else "disabled")
+        )
     else:
         st.error("Chat service is not configured.")
         st.caption(service_error or "Check your .env configuration.")

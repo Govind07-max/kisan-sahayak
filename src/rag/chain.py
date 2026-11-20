@@ -8,6 +8,8 @@ from typing import Any
 
 from config.prompts import (
     CITATION_ERROR_MESSAGES,
+    GENERAL_FALLBACK_NOTICES,
+    GENERAL_FALLBACK_SYSTEM_PROMPT,
     INVALID_QUESTION_MESSAGES,
     LLM_ERROR_MESSAGES,
     NOT_FOUND_MESSAGES,
@@ -16,7 +18,8 @@ from config.prompts import (
 )
 from config.settings import Settings, SettingsError, get_settings
 from src.llm.base import BaseLLMProvider, LLMError
-from src.rag.prompts import build_user_prompt
+from src.rag.fallback import clean_general_answer, is_general_fallback_blocked
+from src.rag.prompts import build_general_fallback_prompt, build_user_prompt
 from src.retrieval.context_builder import ContextBuilder, ContextBundle
 from src.retrieval.retriever import RetrievalError, Retriever
 from src.utils.document_utils import (
@@ -105,6 +108,54 @@ class RAGChain:
     def model_name(self) -> str:
         return self.llm.model
 
+    def _try_general_fallback(
+        self,
+        question: str,
+        language: str,
+        retrieved_chunks: int = 0,
+    ) -> dict[str, Any] | None:
+        """Return a labeled general answer, or None if the fallback cannot be used."""
+        if not self.settings.enable_general_llm_fallback:
+            return None
+        if is_general_fallback_blocked(question):
+            logger.info("General fallback blocked for this question")
+            return None
+
+        prompt = build_general_fallback_prompt(question, language)
+        try:
+            response = self.llm.generate(GENERAL_FALLBACK_SYSTEM_PROMPT, prompt)
+        except LLMError as exc:
+            logger.error(
+                "General fallback LLM failure provider=%s code=%s detail=%s",
+                self.provider_name,
+                exc.code,
+                exc.detail,
+            )
+            return None
+        except Exception as exc:
+            logger.exception("Unexpected general fallback failure: %s", exc)
+            return None
+
+        answer = clean_general_answer((response.text or "").strip())
+        if not answer:
+            return None
+
+        notice = GENERAL_FALLBACK_NOTICES.get(
+            language, GENERAL_FALLBACK_NOTICES["en"]
+        )
+        return {
+            "answer": f"{notice}\n\n{answer}",
+            "language": language,
+            "sources": [],
+            "retrieval_status": "general_llm_fallback",
+            "citation_status": "not_applicable",
+            "provider": self.provider_name,
+            "model": self.model_name,
+            "retrieved_chunks": retrieved_chunks,
+            "is_general_fallback": True,
+            "fallback_notice": notice,
+        }
+
     def ask_question(
         self,
         question: str,
@@ -167,12 +218,13 @@ class RAGChain:
             )
 
         if not chunks:
-            return _error_response(
+            refusal = _error_response(
                 NOT_FOUND_MESSAGES[resolved_language],
                 resolved_language,
                 "no_relevant_documents",
                 error_code="no_relevant_documents",
             )
+            return self._try_general_fallback(safe_question, resolved_language) or refusal
 
         bundle: ContextBundle = self.context_builder.build(chunks)
         if not bundle.sources or not bundle.context_text:
@@ -224,7 +276,7 @@ class RAGChain:
             )
 
         if _is_not_found_answer(answer):
-            return {
+            refusal = {
                 "answer": NOT_FOUND_MESSAGES[resolved_language],
                 "language": resolved_language,
                 "sources": [],
@@ -234,6 +286,10 @@ class RAGChain:
                 "model": self.model_name,
                 "retrieved_chunks": len(chunks),
             }
+            return (
+                self._try_general_fallback(safe_question, resolved_language, len(chunks))
+                or refusal
+            )
 
         answer, sources, citation_status = self._validate_citations(answer, bundle)
 

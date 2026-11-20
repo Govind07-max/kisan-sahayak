@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     ollama_timeout_seconds: int = Field(default=120, ge=10, le=600)
     llm_temperature: float = Field(default=0.2, ge=0.0, le=1.0)
     llm_max_output_tokens: int = Field(default=1400, ge=128, le=8192)
+    enable_general_llm_fallback: bool = False
 
     # ------------------------------------------------------------------
     # Embeddings and vector store

@@ -36,3 +36,19 @@ ANSWER REQUIREMENTS
   when the excerpts allow it.
 - Prefer short paragraphs. Use numbered steps for procedures.
 """
+
+
+def build_general_fallback_prompt(question: str, language: str) -> str:
+    """Build the prompt for the optional, clearly labeled general answer."""
+    language_name = LANGUAGE_NAMES.get(language, "English")
+    return f"""USER QUESTION (answer in {language_name}; language code: {language}):
+{question}
+
+No verified document excerpt answered this question. General guidance mode is
+enabled, so answer briefly from general knowledge only if no current, official,
+or personal detail is needed.
+
+Do not use [S#] citations, do not invent URLs, and do not claim the answer is
+official. If a specific amount, date, current rule, or official status is needed,
+say that you cannot verify it and direct the user to the official department.
+"""

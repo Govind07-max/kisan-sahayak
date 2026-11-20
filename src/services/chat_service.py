@@ -75,6 +75,7 @@ class ChatService:
             "top_k": self.settings.top_k,
             "relevance_threshold": self.settings.relevance_threshold,
             "llm_provider": self.settings.llm_provider,
+            "enable_general_llm_fallback": self.settings.enable_general_llm_fallback,
         }
 
 

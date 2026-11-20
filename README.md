@@ -115,6 +115,14 @@ Then list the models available to your key and copy one printed model ID into `G
 
 Do not guess a model name and do not commit `.env`. Every teammate should use their own key.
 
+Optional: add this line only if you want unverified general answers when the documents have no evidence:
+
+```env
+ENABLE_GENERAL_LLM_FALLBACK=true
+```
+
+It is `false` by default. See [11.7 Optional general-LLM fallback](#117-optional-general-llm-fallback).
+
 ### 6. Build the index and verify
 
 ```bash
@@ -127,7 +135,7 @@ Expected results:
 
 ```text
 ChromaDB collection count: 2240
-59 passed
+66 passed
 ```
 
 The first ingestion downloads the embedding model and builds ChromaDB, so it takes a few minutes. Later runs are incremental and skip unchanged documents.
@@ -177,13 +185,14 @@ The project is **indexed, tested, and live-verified**. Retrieval works without a
 | OCR pages | **97** |
 | Ingestion failures | **0** |
 | ChromaDB collection | `farmer_knowledge` |
-| Automated tests | **59 passed** |
+| Automated tests | **66 passed** |
 | Dependency check | `pip check` reports no broken requirements |
 | Retrieval evaluation | **100% hit@5**, **MRR 1.000**, **recall 0.979**, mean top score **0.7822** |
 | Runtime similarity threshold | **0.66** (configured default and `.env.example` value) |
 | Streamlit smoke test | **Passed**: no-key configuration message and configured startup |
 | Incremental ingestion | **Passed**: 26 unchanged documents skipped; collection stayed at 2,240 |
 | Live Gemini verification | **Completed**: all 24 answerable questions produced verified live answers; 6/6 unsupported questions abstained |
+| General LLM fallback | **Available but off by default**; high-risk questions are always blocked |
 | `.env` in this workspace | **Present** (ignored by Git) |
 | `GEMINI_API_KEY` in this workspace | **Present** in `.env`; never printed or committed |
 
@@ -305,7 +314,7 @@ The following parts are project-specific code written for Kisan Sahayak:
   - Configuration and health messages
 
 - **Tests and evaluation**
-  - 59 automated tests
+  - 66 automated tests
   - A 30-question evaluation dataset
   - Retrieval evaluation with hit rate, MRR, and recall
   - Live generation evaluation scaffolding
@@ -688,7 +697,7 @@ kisan-sahayak/
 │   └── utils/                     # Logging, text, redaction, language
 ├── storage/                       # Generated ChromaDB + manifest
 ├── logs/                          # Generated logs
-└── tests/                         # 59 automated tests
+└── tests/                         # 66 automated tests
 ```
 
 ---
@@ -1006,7 +1015,8 @@ The app:
 - Parses source markers in the model’s answer.
 - Removes invalid source IDs.
 - Shows only sources that were actually retrieved.
-- Marks an answer as `unverified` if no valid citation is present.
+- Retries once if the answer has no valid source marker.
+- Rejects the answer if it still has no valid citation after the retry.
 - Returns no supporting sources for the localized abstention message.
 
 ### 11.4 Source URL behavior
@@ -1036,6 +1046,33 @@ The app distinguishes:
 - LLM quota/network/authentication failure
 
 Each has a localized user-facing message rather than a raw stack trace.
+
+### 11.7 Optional general-LLM fallback
+
+By default the app **does not** answer without document evidence. An optional
+general-knowledge fallback can be enabled with:
+
+```env
+ENABLE_GENERAL_LLM_FALLBACK=true
+```
+
+When enabled, it is used only when retrieval finds no relevant chunks or the
+grounded answer says the documents are insufficient. It is **not** used for
+quota, network, or authentication failures.
+
+Guardrails:
+
+- High-risk questions are always blocked from the fallback:
+  live weather, market prices/MSP, current deadlines or rules, scheme amounts,
+  and personal eligibility decisions.
+- The fallback answer is clearly labeled as **unverified general guidance** in
+  the chat UI.
+- It never shows source cards, `[S#]` citations, or invented URLs.
+- It uses a separate prompt that forbids current, official, or personal claims.
+- It costs an extra LLM call only when it actually runs.
+
+The strict, document-only behavior remains the default and is what the
+evaluation measures.
 
 ---
 
@@ -1176,7 +1213,7 @@ This is useful for demonstrating the retrieval and engineering work before live 
 .venv/bin/python -m pytest -q
 ```
 
-The current suite has **59 tests** and covers:
+The current suite has **66 tests** and covers:
 
 - PDF extraction and page metadata
 - Blank and invalid PDFs
@@ -1274,7 +1311,7 @@ Start with `--limit 5` to control cost.
 - Inspect the document corpus and inventory
 - Rebuild the local vector index
 - Check OCR health
-- Run all 59 tests
+- Run all 66 tests
 - Run the retrieval evaluation
 - Inspect retrieved chunks, page numbers, and scores
 - Inspect the architecture and engineering decisions
