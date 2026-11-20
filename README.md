@@ -26,14 +26,13 @@ This project was built as a transparent, inspectable RAG application. It does **
 12. [Streamlit user interface](#12-streamlit-user-interface)
 13. [How to run the project](#13-how-to-run-the-project)
 14. [How to test the project](#14-how-to-test-the-project)
-15. [How to demonstrate it to your guide](#15-how-to-demonstrate-it-to-your-guide)
-16. [What you can do with it right now](#16-what-you-can-do-with-it-right-now)
-17. [Evaluation results](#17-evaluation-results)
-18. [What is still remaining](#18-what-is-still-remaining)
-19. [Known limitations](#19-known-limitations)
-20. [Security and privacy](#20-security-and-privacy)
-21. [Troubleshooting](#21-troubleshooting)
-22. [Commands at a glance](#22-commands-at-a-glance)
+15. [What you can do with it right now](#15-what-you-can-do-with-it-right-now)
+16. [Evaluation results](#16-evaluation-results)
+17. [What is still remaining](#17-what-is-still-remaining)
+18. [Known limitations](#18-known-limitations)
+19. [Security and privacy](#19-security-and-privacy)
+20. [Troubleshooting](#20-troubleshooting)
+21. [Commands at a glance](#21-commands-at-a-glance)
 
 ---
 
@@ -232,7 +231,7 @@ It does **not** currently provide:
 
 ## 3. What was built in this project
 
-This section distinguishes the original project work from the third-party libraries and models it uses. This is useful when explaining the project to a guide or evaluator.
+This section distinguishes the original project work from the third-party libraries and models it uses.
 
 ### Original implementation
 
@@ -343,7 +342,7 @@ The project code connects these pieces and adds the domain-specific logic, metad
 
 ## 5. Concepts explained simply
 
-If you are presenting this to a guide, these explanations should let you describe the system without treating it as a black box.
+These explanations describe the system without treating it as a black box.
 
 ### 5.1 What is RAG?
 
@@ -1268,179 +1267,7 @@ Start with `--limit 5` to control cost.
 
 ---
 
-## 15. How to demonstrate it to your guide
-
-The strongest demonstration has two parts: **offline engineering evidence** and, if credentials are available, **live answer behavior**.
-
-### 15.1 Five-minute demo without an API key
-
-This is the safest route if you do not want to configure Gemini in front of your guide.
-
-#### Step 1 — Show the project and architecture
-
-Open `README.md` and point to:
-
-- The architecture diagram
-- The ingestion flow
-- The question-answering flow
-- The module map
-
-Explain that the project does not train a model; it builds a custom document and retrieval pipeline around pretrained embeddings and a language model.
-
-#### Step 2 — Show the corpus status
-
-```bash
-cd kisan-sahayak
-.venv/bin/python ingest.py --stats
-```
-
-Point out:
-
-- 26 documents
-- 2,240 chunks
-- collection name `farmer_knowledge`
-
-If you want to show the manifest:
-
-```bash
-.venv/bin/python - <<'PY'
-import json
-m = json.load(open('storage/ingestion_manifest.json'))
-print('documents:', len(m['documents']))
-print('chunks:', sum(v.get('chunks', 0) for v in m['documents'].values()))
-print('ocr pages:', sum(len(v.get('ocr_pages', [])) for v in m['documents'].values()))
-PY
-```
-
-#### Step 3 — Run the tests
-
-```bash
-.venv/bin/python -m pytest -q
-```
-
-Say:
-
-> “The automated suite covers extraction, OCR, chunking, embeddings, vector storage, retrieval, citation validation, abstention, privacy, and incremental ingestion.”
-
-#### Step 4 — Run the retrieval evaluation
-
-```bash
-.venv/bin/python evaluation/run_evaluation.py --top-k 5 --threshold 0.66
-```
-
-Point to:
-
-- 100% hit@5
-- MRR 1.000
-- 0.979 expected-document recall
-- All six unsupported questions filtered
-
-Be precise:
-
-> “This is document-level retrieval evaluation. It proves the expected source is found. Live answer correctness still needs LLM evaluation.”
-
-#### Step 5 — Show a source excerpt
-
-You can demonstrate retrieval without the UI by using a small Python snippet:
-
-```bash
-.venv/bin/python - <<'PY'
-from config.settings import get_settings
-from src.embeddings.embedder import get_embedding_service
-from src.retrieval.retriever import Retriever
-from src.vectorstore.chroma_store import ChromaStore
-
-settings = get_settings()
-store = ChromaStore(settings)
-embedder = get_embedding_service(
-    settings.embedding_model,
-    settings.embedding_batch_size,
-    settings.embedding_device,
-)
-retriever = Retriever(settings, store, embedder)
-
-question = "What is PM-KISAN and how much financial support does it provide?"
-for rank, chunk in enumerate(retriever.retrieve(question, top_k=5), 1):
-    meta = chunk.metadata
-    print(rank, meta.get("document_id"), meta.get("page_number"), round(chunk.score, 3))
-    print(chunk.text[:300].replace("\n", " "))
-    print()
-PY
-```
-
-This shows the metadata and page-level excerpts that the LLM would receive.
-
-#### Step 6 — Show the app’s configuration behavior
-
-```bash
-.venv/bin/streamlit run app.py
-```
-
-Without a key, show that the app starts and gives a clear configuration message. This demonstrates deliberate failure handling.
-
-### 15.2 Demo with live Gemini
-
-If credentials are configured:
-
-```bash
-cp .env.example .env
-# edit .env
-.venv/bin/python ingest.py --list-models
-# put the chosen model in GEMINI_MODEL
-.venv/bin/streamlit run app.py
-```
-
-Ask these in order:
-
-| Language | Question | What to show |
-|---|---|---|
-| Marathi | पीएम किसान योजनेचा उद्देश काय आहे आणि योजनेत किती आर्थिक सहाय्य मिळते? | Marathi answer, PM-KISAN sources, historical caveat |
-| Hindi | पीएम किसान योजना के लिए कौन पात्र है? | Hindi answer and cross-lingual sources |
-| English | What documents are required for PM-KISAN? | Required-document answer and page citations |
-| English | How does integrated pest management help control pests in cotton? | Cotton IPM sources from `GRD-040` |
-| English | How does a farmer register and log in to the Maha-DBT portal? | Maha-DBT manual sources |
-| Unsupported | What is the current MSP for wheat in 2026? | Refusal instead of a fabricated current MSP |
-| Unsupported | आज पुण्यात पाऊस पडेल का? | Refusal rather than a fake live weather forecast |
-
-For each answer, expand **Supporting sources** and point out:
-
-- title
-- filename
-- page number or page range
-- validity status
-- blank URL when no official URL exists
-
-### 15.3 What to say about your contribution
-
-A concise explanation:
-
-> “I built the data ingestion and evaluation pipeline around pretrained tools. I curated the document corpus, wrote the page-aware extraction and OCR fallback flow, implemented sliding overlapping chunks with stable IDs and an incremental manifest, integrated a local multilingual embedding model with ChromaDB, added Marathi/Hindi scheme-name and section-intent query expansion, designed per-document retrieval diversification, built the grounded RAG chain with citation validation and abstention, and created the Streamlit UI and 30-question evaluation set. I did not train the embedding model or the LLM.”
-
-### 15.4 What to show as evidence
-
-- `storage/ingestion_manifest.json`
-- Chroma count output
-- `evaluation/results/retrieval_*.json`
-- pytest output
-- `storage/chroma_db/`
-- page-level source cards in the UI
-- the architecture diagram in this README
-
-### 15.5 What not to claim
-
-Do not claim:
-
-- “The LLM is 100% accurate.”
-- “The retrieval hit rate proves answer correctness.”
-- “The weather information is current.”
-- “The PM-KISAN rules are current.”
-- “Source links are official” when the URL is blank.
-- “I trained the embedding model.”
-- “The system works for every Indian scheme.” It only handles the indexed corpus.
-
----
-
-## 16. What you can do with it right now
+## 15. What you can do with it right now
 
 ### Works now without an API key
 
@@ -1450,7 +1277,7 @@ Do not claim:
 - Run all 59 tests
 - Run the retrieval evaluation
 - Inspect retrieved chunks, page numbers, and scores
-- Demonstrate the architecture and engineering decisions
+- Inspect the architecture and engineering decisions
 - Add documents and test ingestion
 - Start the Streamlit app and see its configuration behavior
 - Use the local Ollama path if Ollama and a model are available
@@ -1462,7 +1289,6 @@ Do not claim:
 - Inspect supporting page-level sources
 - Test abstention on unsupported questions
 - Evaluate answer language and citation behavior
-- Demonstrate the full RAG experience to your guide
 
 ### Not available as of now
 
@@ -1475,9 +1301,9 @@ Do not claim:
 
 ---
 
-## 17. Evaluation results
+## 16. Evaluation results
 
-### 17.1 Retrieval evaluation
+### 16.1 Retrieval evaluation
 
 Dataset: 30 questions
 
@@ -1514,7 +1340,7 @@ The final evidence audit also confirmed that the top-5 context now includes:
 - PMFBY claim-intimation and loss-assessment steps — `GRD-005`, pages 54–61
 - Agriculture Infrastructure Fund 3% interest-subvention clause — `AIF-001`, pages 5–6
 
-### 17.2 Threshold separation
+### 16.2 Threshold separation
 
 | Group | Top score range |
 |---|---:|
@@ -1523,7 +1349,7 @@ The final evidence audit also confirmed that the top-5 context now includes:
 
 A threshold of **0.66** cleanly separates the current evaluation set.
 
-### 17.3 Answer-level evaluation
+### 16.3 Answer-level evaluation
 
 Not yet run in this workspace because no LLM credentials are configured. The live evaluator exists and can be run after setup:
 
@@ -1535,11 +1361,11 @@ Until that is done, report retrieval results and deliberately avoid claiming ver
 
 ---
 
-## 18. What is still remaining
+## 17. What is still remaining
 
 ### Completed in local verification
 
-- The project guide/README was expanded with architecture, concepts, technology choices, operation, testing, and a demonstration script.
+- The README was expanded with architecture, concepts, technology choices, operation, testing, and run instructions.
 - `.env.example` now contains the calibrated **0.66** threshold.
 - The final 2,240-chunk index was smoke-tested with Streamlit AppTest:
   - no-key mode showed the expected configuration message;
@@ -1572,12 +1398,12 @@ Until that is done, report retrieval results and deliberately avoid claiming ver
 - Add a longer paid-tier live run with a single model
 - Add answer-level expert review
 - Initialize Git and commit the project
-- Add screenshots to the guide
+- Add screenshots to the README
 - Add a small demo video or slide deck
 
 ---
 
-## 19. Known limitations
+## 18. Known limitations
 
 1. **No Hindi source documents.** The corpus has 22 English and 4 Marathi documents. Hindi answers are cross-lingual.
 2. **PM-KISAN documents describe 2018–19 rules.** Present them as historical and tell users to verify current rules.
@@ -1592,7 +1418,7 @@ Until that is done, report retrieval results and deliberately avoid claiming ver
 
 ---
 
-## 20. Security and privacy
+## 19. Security and privacy
 
 - API keys are read from `.env` or environment variables.
 - `.env`, `.venv`, `.local/`, `storage/`, logs, and local PDFs are excluded by `.gitignore`.
@@ -1606,7 +1432,7 @@ Until that is done, report retrieval results and deliberately avoid claiming ver
 
 ---
 
-## 21. Troubleshooting
+## 20. Troubleshooting
 
 ### `GEMINI_API_KEY is not set`
 
@@ -1661,7 +1487,7 @@ Then confirm `LLM_PROVIDER=ollama` and that the selected model is installed.
 
 ---
 
-## 22. Commands at a glance
+## 21. Commands at a glance
 
 ```bash
 # After cloning and restoring data/raw (see Quick start above)
