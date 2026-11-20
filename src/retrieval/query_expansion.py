@@ -1,0 +1,115 @@
+"""Small, transparent multilingual retrieval-name expansion.
+
+The corpus is mostly English, while farmers ask questions in Marathi and Hindi.
+The multilingual embedding model handles cross-lingual meaning, but explicit
+scheme names are still easy to miss when they are written in a different script
+or as a local abbreviation.  These aliases add only scheme/topic names to the
+retrieval query; they never add answer facts, amounts, or dates.
+"""
+
+from __future__ import annotations
+
+import re
+
+# (trigger phrases, English retrieval terms)
+_ALIAS_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        (
+            "पीएम किसान",
+            "पीएम-किसान",
+            "पंतप्रधान किसान सन्मान",
+            "प्रधानमंत्री किसान सम्मान",
+            "pm-kisan",
+            "pm kisan",
+            "pmkisan",
+        ),
+        "PM-KISAN Pradhan Mantri Kisan Samman Nidhi farmer income support scheme",
+    ),
+    (
+        (
+            "पीक विमा",
+            "पंतप्रधान पीक विमा",
+            "फसल बीमा",
+            "प्रधानमंत्री फसल बीमा",
+            "pmfby",
+            "fasal bima",
+        ),
+        "PMFBY Pradhan Mantri Fasal Bima Yojana crop insurance",
+    ),
+    (
+        (
+            "मृदा आरोग्य",
+            "मृदा स्वास्थ्य",
+            "माती परीक्षण",
+            "मिट्टी परीक्षण",
+            "soil health",
+            "soil testing",
+        ),
+        "Soil Health Card soil sampling and testing",
+    ),
+    (
+        ("किसान क्रेडिट", "kisan credit", "kcc"),
+        "Kisan Credit Card KCC farmer credit",
+    ),
+    (
+        ("कापूस", "कपास", "cotton"),
+        "cotton integrated pest management IPM",
+    ),
+    (
+        (
+            "महा-डीबीटी",
+            "महाडीबीटी",
+            "महा डीबीटी",
+            "maha-dbt",
+            "mahadbt",
+            "maha dbt",
+        ),
+        "Maha-DBT MahaDBT Farmer Application Portal registration Farmer ID OTP",
+    ),
+    (
+        (
+            "महाॲग्री",
+            "महा एआय",
+            "महाएआय",
+            "mahaagri",
+            "maha-agri",
+            "maha agri",
+        ),
+        "MahaAgri-AI Policy 2025-2029 artificial intelligence",
+    ),
+    (
+        (
+            "कृषि अवसंरचना",
+            "कृषी अवसंरचना",
+            "agriculture infrastructure",
+            "aif",
+        ),
+        "Agriculture Infrastructure Fund AIF interest subvention",
+    ),
+)
+
+
+def _has_latin_trigger(question: str, trigger: str) -> bool:
+    """Avoid matching short Latin abbreviations inside unrelated words."""
+    if re.fullmatch(r"[a-z0-9-]+", trigger):
+        return bool(re.search(rf"\b{re.escape(trigger)}\b", question))
+    return trigger in question
+
+
+def expand_query(question: str) -> str:
+    """Append English scheme/topic names when a known local alias is present."""
+    if not question or not question.strip():
+        return question
+    lowered = question.casefold()
+    extras: list[str] = []
+    for triggers, expansion in _ALIAS_RULES:
+        if any(_has_latin_trigger(lowered, trigger) for trigger in triggers):
+            if expansion not in extras:
+                extras.append(expansion)
+    if not extras:
+        return question
+    return (
+        question.rstrip()
+        + "\nRelevant scheme/topic names for retrieval: "
+        + "; ".join(extras)
+    )

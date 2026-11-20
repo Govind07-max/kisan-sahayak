@@ -1,0 +1,37 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# Local Tesseract installation
+.local/
+
+# Generated data and logs
+logs/
+*.log
+storage/
+data/processed/
+data/failed/
+evaluation/results/
+
+# Source PDFs are large; keep them locally and do not accidentally commit them.
+# The document inventory and project code remain versioned.
+data/raw/**/*.pdf
+data/raw/*.pdf
+
+# Streamlit and editor files
+.streamlit/secrets.toml
+.idea/
+.vscode/
+.DS_Store
